@@ -5,6 +5,7 @@ import { ProductGrid } from '@/components/ProductGrid';
 import { CategoryNavHorizontal } from '@/components/CategoryNav';
 import { CartButton } from '@/components/CartButton';
 import { Testimonials } from '@/components/Testimonials';
+import { FlyingGryphon } from '@/components/FlyingGryphon';
 
 /**
  * Homepage (Server Component)
@@ -24,6 +25,9 @@ export default async function HomePage() {
 
   return (
     <main className="min-h-screen bg-gray-50">
+      {/* Flying Gryphon Animation */}
+      <FlyingGryphon />
+
       {/* Header */}
       <header className="bg-white shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
