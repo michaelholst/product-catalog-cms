@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { categories } from '@/lib/data/categories';
+import { prisma } from '@/lib/db';
 
 /**
  * GET /api/categories
@@ -19,9 +19,11 @@ import { categories } from '@/lib/data/categories';
  */
 export async function GET(request: NextRequest) {
   try {
-    // Return all categories
+    // Fetch all categories from database
     // Educational: This is a simple read operation, no filtering needed
     // In a real app with many categories, you might add pagination
+    const categories = await prisma.category.findMany();
+
     return NextResponse.json({
       success: true,
       data: categories,

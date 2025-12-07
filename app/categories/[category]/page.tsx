@@ -68,8 +68,8 @@ export default async function CategoryPage({ params, searchParams }: CategoryPag
     filters.limit = parseInt(searchParams.limit, 10);
   }
 
-  // Fetch products for this category
-  const result = getProductsByCategory(params.category, filters);
+  // Fetch products for this category from database
+  const result = await getProductsByCategory(params.category, filters);
 
   return (
     <main className="min-h-screen bg-gray-50">

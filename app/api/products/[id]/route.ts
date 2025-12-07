@@ -44,7 +44,7 @@ export async function GET(
 
     // Fetch product from service
     // Educational: Service layer handles the business logic
-    const product = getProduct(id);
+    const product = await getProduct(id);
 
     // Check if product exists
     // Educational: 404 Not Found is the correct status when resource doesn't exist

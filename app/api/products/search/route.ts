@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
 
     // Perform search
     // Educational: Service layer handles the search algorithm
-    const searchResult = performSearch(query, limit);
+    const searchResult = await performSearch(query, limit);
 
     // Return results
     // Educational: Search responses often include the query for reference

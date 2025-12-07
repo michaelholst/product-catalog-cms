@@ -25,9 +25,9 @@ interface ProductDetailPageProps {
 }
 
 export default async function ProductDetailPage({ params }: ProductDetailPageProps) {
-  // Fetch product by slug
+  // Fetch product by slug from database
   // Educational: await works directly in Server Components
-  const product = getProductBySlugService(params.slug);
+  const product = await getProductBySlugService(params.slug);
 
   // Show 404 if product not found
   // Educational: notFound() is a Next.js function that shows the 404 page
@@ -38,7 +38,7 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
   // Calculate derived data
   const discount = getDiscountPercentage(product);
   const inventoryStatus = getInventoryStatus(product);
-  const relatedProducts = getRelatedProducts(product, 4);
+  const relatedProducts = await getRelatedProducts(product, 4);
 
   return (
     <main className="min-h-screen bg-gray-50">

@@ -79,10 +79,10 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
     filters.limit = parseInt(searchParams.limit, 10);
   }
 
-  // Fetch products with filters
+  // Fetch products with filters from database
   // Educational: This runs on the server for every request
   // The data is fresh and SEO-friendly
-  const result = getProducts(filters);
+  const result = await getProducts(filters);
 
   return (
     <main className="min-h-screen bg-gray-50">

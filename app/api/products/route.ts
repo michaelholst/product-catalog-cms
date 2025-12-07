@@ -103,7 +103,7 @@ export async function GET(request: NextRequest) {
     // Call service to get products
     // Educational: Controllers/routes should be thin - just handle HTTP,
     // then delegate to service layer for business logic
-    const result = getProducts(filters);
+    const result = await getProducts(filters);
 
     // Add available filter options to response
     // Educational: This helps the frontend build filter UI dynamically

@@ -1,57 +1,162 @@
 import { Product, FilterParams, InventoryStatus } from '../types/product';
 import { PaginatedResponse } from '../types/api';
-import { products, getProductById, getProductBySlug } from '../data/products';
-import { filterProducts, sortProducts, searchProducts } from './filter-service';
-import { paginateResults } from './pagination-service';
+import { prisma } from '../db';
+import { sortProducts } from './filter-service';
 
 /**
- * Products Service
+ * Products Service - Database Version
  *
- * This is the main business logic layer for product operations.
- * It orchestrates filtering, sorting, and pagination.
+ * This is the database-backed version of the products service.
+ * It uses Prisma ORM to interact with the SQLite database.
  *
- * Educational Note: In a real app, this would interact with a database.
- * We're using in-memory data, but the patterns are the same.
+ * Educational Note: This demonstrates how to migrate from in-memory data to a database.
+ * The API surface remains the same, but the implementation uses database queries.
  *
- * Architecture Pattern: Service Layer
+ * Architecture Pattern: Service Layer with ORM
  * - Controllers/Routes call services
  * - Services contain business logic
- * - Services call data access layer (database)
+ * - Services use Prisma to access database
  */
+
+/**
+ * Helper function to transform database product to Product type
+ * Parses JSON fields stored in the database
+ */
+function transformDbProduct(dbProduct: any): Product {
+  return {
+    id: dbProduct.id,
+    slug: dbProduct.slug,
+    sku: dbProduct.sku,
+    name: dbProduct.name,
+    description: dbProduct.description,
+    longDescription: dbProduct.longDescription,
+    price: dbProduct.price,
+    originalPrice: dbProduct.originalPrice,
+    currency: dbProduct.currency,
+    category: dbProduct.category,
+    subcategory: dbProduct.subcategory,
+    tags: JSON.parse(dbProduct.tags),
+    inventory: {
+      inStock: dbProduct.inStock,
+      quantity: dbProduct.quantity,
+      lowStockThreshold: dbProduct.lowStockThreshold,
+      reservedQuantity: dbProduct.reservedQuantity,
+    },
+    images: JSON.parse(dbProduct.images),
+    featured: dbProduct.featured,
+    isNew: dbProduct.isNew,
+    rating: dbProduct.ratingAverage
+      ? {
+          average: dbProduct.ratingAverage,
+          count: dbProduct.ratingCount || 0,
+        }
+      : undefined,
+    attributes: JSON.parse(dbProduct.attributes),
+    createdAt: dbProduct.createdAt,
+    updatedAt: dbProduct.updatedAt,
+    publishedAt: dbProduct.publishedAt,
+  };
+}
 
 /**
  * Get Products with Filters, Sorting, and Pagination
  *
- * This is the main product listing function.
- * It demonstrates how multiple operations combine in a typical API endpoint.
+ * This is the main product listing function using database queries.
  *
  * Educational Flow:
- * 1. Start with all products
- * 2. Apply filters (narrows results)
- * 3. Apply sorting (orders results)
- * 4. Apply pagination (limits results)
- * 5. Return formatted response
+ * 1. Build WHERE clauses from filters
+ * 2. Execute database query with filters
+ * 3. Apply sorting (can be done in DB or in memory)
+ * 4. Apply pagination with LIMIT and OFFSET
+ * 5. Return formatted response with metadata
  */
-export function getProducts(filters: FilterParams = {}): PaginatedResponse<Product> {
-  // Step 1: Start with all products
-  // Educational: In a database, this would be SELECT * FROM products
-  let results = [...products];
+export async function getProducts(
+  filters: FilterParams = {}
+): Promise<PaginatedResponse<Product>> {
+  // Build where clause for Prisma
+  const where: any = {};
 
-  // Step 2: Apply filters
-  // Educational: This is WHERE clauses in SQL
-  results = filterProducts(results, filters);
+  // Category filter
+  if (filters.category) {
+    where.category = filters.category;
+  }
 
-  // Step 3: Apply sorting
-  // Educational: This is ORDER BY in SQL
+  // Price range filter
+  if (filters.minPrice !== undefined || filters.maxPrice !== undefined) {
+    where.price = {};
+    if (filters.minPrice !== undefined) {
+      where.price.gte = filters.minPrice;
+    }
+    if (filters.maxPrice !== undefined) {
+      where.price.lte = filters.maxPrice;
+    }
+  }
+
+  // In stock filter
+  if (filters.inStock !== undefined) {
+    where.inStock = filters.inStock;
+  }
+
+  // Tags filter (OR logic - product has at least one of the tags)
+  if (filters.tags && filters.tags.length > 0) {
+    // Since tags are stored as JSON, we need to filter in memory after fetching
+    // For now, we'll fetch all matching other filters and filter tags in memory
+  }
+
+  // Search filter
+  if (filters.search) {
+    // Full-text search across name and description
+    // Note: SQLite searches are case-insensitive by default with LIKE
+    where.OR = [
+      { name: { contains: filters.search } },
+      { description: { contains: filters.search } },
+    ];
+  }
+
+  // Pagination
+  const page = filters.page || 1;
+  const limit = Math.min(filters.limit || 12, 100); // Max 100 items per page
+  const skip = (page - 1) * limit;
+
+  // Fetch products from database
+  const [dbProducts, total] = await Promise.all([
+    prisma.product.findMany({
+      where,
+      skip,
+      take: limit,
+    }),
+    prisma.product.count({ where }),
+  ]);
+
+  // Transform database products to Product type
+  let results = dbProducts.map(transformDbProduct);
+
+  // Apply tags filter in memory (since tags are JSON)
+  if (filters.tags && filters.tags.length > 0) {
+    results = results.filter(product =>
+      filters.tags!.some(tag => product.tags.includes(tag))
+    );
+  }
+
+  // Apply sorting
   results = sortProducts(results, filters.sortBy);
 
-  // Step 4: Apply pagination
-  // Educational: This is LIMIT and OFFSET in SQL
-  const page = filters.page || 1;
-  const limit = filters.limit || 12;
-  const paginatedResponse = paginateResults(results, page, limit);
+  // Calculate pagination metadata
+  const totalPages = Math.ceil(total / limit);
 
-  return paginatedResponse;
+  return {
+    success: true,
+    data: results,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages,
+      hasNext: page < totalPages,
+      hasPrev: page > 1,
+    },
+    timestamp: new Date().toISOString(),
+  };
 }
 
 /**
@@ -59,9 +164,12 @@ export function getProducts(filters: FilterParams = {}): PaginatedResponse<Produ
  *
  * Educational: This is like SELECT * FROM products WHERE id = ?
  */
-export function getProduct(id: string): Product | null {
-  const product = getProductById(id);
-  return product || null;
+export async function getProduct(id: string): Promise<Product | null> {
+  const dbProduct = await prisma.product.findUnique({
+    where: { id },
+  });
+
+  return dbProduct ? transformDbProduct(dbProduct) : null;
 }
 
 /**
@@ -70,23 +178,43 @@ export function getProduct(id: string): Product | null {
  * Used for product detail pages with SEO-friendly URLs
  * Educational: Slugs are URL-friendly identifiers
  */
-export function getProductBySlugService(slug: string): Product | null {
-  const product = getProductBySlug(slug);
-  return product || null;
+export async function getProductBySlugService(slug: string): Promise<Product | null> {
+  const dbProduct = await prisma.product.findUnique({
+    where: { slug },
+  });
+
+  return dbProduct ? transformDbProduct(dbProduct) : null;
 }
 
 /**
  * Search Products
  *
  * Full-text search with relevance ranking
- * Educational: Real apps use search engines like Elasticsearch or Algolia
+ * Educational: Uses database LIKE queries for search
  */
-export function performSearch(query: string, limit: number = 20): {
+export async function performSearch(
+  query: string,
+  limit: number = 20
+): Promise<{
   results: Product[];
   query: string;
   count: number;
-} {
-  const results = searchProducts(query, products).slice(0, limit);
+}> {
+  // Search in name, description, and tags
+  // Note: SQLite searches are case-insensitive by default with LIKE
+  const dbProducts = await prisma.product.findMany({
+    where: {
+      OR: [
+        { name: { contains: query } },
+        { description: { contains: query } },
+        { longDescription: { contains: query } },
+        { tags: { contains: query } },
+      ],
+    },
+    take: limit,
+  });
+
+  const results = dbProducts.map(transformDbProduct);
 
   return {
     results,
@@ -101,23 +229,29 @@ export function performSearch(query: string, limit: number = 20): {
  * Returns products marked as featured, typically for homepage
  * Educational: This is WHERE featured = true
  */
-export function getFeaturedProducts(limit: number = 8): Product[] {
-  return products
-    .filter(p => p.featured)
-    .slice(0, limit);
+export async function getFeaturedProducts(limit: number = 8): Promise<Product[]> {
+  const dbProducts = await prisma.product.findMany({
+    where: { featured: true },
+    take: limit,
+  });
+
+  return dbProducts.map(transformDbProduct);
 }
 
 /**
  * Get New Arrivals
  *
  * Returns recently added products
- * Educational: This combines filtering and sorting
+ * Educational: This combines filtering and sorting with ORDER BY
  */
-export function getNewArrivals(limit: number = 12): Product[] {
-  return products
-    .filter(p => p.isNew)
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-    .slice(0, limit);
+export async function getNewArrivals(limit: number = 12): Promise<Product[]> {
+  const dbProducts = await prisma.product.findMany({
+    where: { isNew: true },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+  });
+
+  return dbProducts.map(transformDbProduct);
 }
 
 /**
@@ -125,10 +259,10 @@ export function getNewArrivals(limit: number = 12): Product[] {
  *
  * Educational: This is WHERE category = ?
  */
-export function getProductsByCategory(
+export async function getProductsByCategory(
   category: string,
   filters: FilterParams = {}
-): PaginatedResponse<Product> {
+): Promise<PaginatedResponse<Product>> {
   // Add category to filters
   const categoryFilters = { ...filters, category };
   return getProducts(categoryFilters);
@@ -140,10 +274,21 @@ export function getProductsByCategory(
  * Returns products with discounted prices
  * Educational: Computed field - checks if originalPrice exists and is higher
  */
-export function getProductsOnSale(limit: number = 12): Product[] {
-  return products
+export async function getProductsOnSale(limit: number = 12): Promise<Product[]> {
+  const dbProducts = await prisma.product.findMany({
+    where: {
+      NOT: { originalPrice: null },
+    },
+    take: limit,
+  });
+
+  // Filter to only include products where originalPrice > price
+  const results = dbProducts
+    .map(transformDbProduct)
     .filter(p => p.originalPrice && p.originalPrice > p.price)
     .slice(0, limit);
+
+  return results;
 }
 
 /**
@@ -152,12 +297,15 @@ export function getProductsOnSale(limit: number = 12): Product[] {
  * Products that need restocking
  * Educational: Business logic - compares quantity to threshold
  */
-export function getLowStockProducts(): Product[] {
-  return products.filter(
-    p =>
-      p.inventory.inStock &&
-      p.inventory.quantity <= p.inventory.lowStockThreshold
-  );
+export async function getLowStockProducts(): Promise<Product[]> {
+  const dbProducts = await prisma.product.findMany({
+    where: { inStock: true },
+  });
+
+  // Filter in memory since we need to compare quantity to lowStockThreshold
+  return dbProducts
+    .map(transformDbProduct)
+    .filter(p => p.inventory.quantity <= p.inventory.lowStockThreshold);
 }
 
 /**
@@ -165,8 +313,14 @@ export function getLowStockProducts(): Product[] {
  *
  * Educational: Simple boolean filter
  */
-export function getOutOfStockProducts(): Product[] {
-  return products.filter(p => !p.inventory.inStock || p.inventory.quantity === 0);
+export async function getOutOfStockProducts(): Promise<Product[]> {
+  const dbProducts = await prisma.product.findMany({
+    where: {
+      OR: [{ inStock: false }, { quantity: 0 }],
+    },
+  });
+
+  return dbProducts.map(transformDbProduct);
 }
 
 /**
@@ -211,20 +365,34 @@ export function getInventoryStatus(product: Product): InventoryStatus {
  * Get Product Statistics
  *
  * Aggregates data for analytics/dashboard
- * Educational: Demonstrates data aggregation (like SQL aggregate functions)
+ * Educational: Demonstrates data aggregation using database aggregate functions
  */
-export function getProductStats() {
-  const total = products.length;
-  const inStock = products.filter(p => p.inventory.inStock).length;
-  const outOfStock = products.filter(p => !p.inventory.inStock).length;
-  const lowStock = getLowStockProducts().length;
-  const featured = products.filter(p => p.featured).length;
+export async function getProductStats() {
+  // Use Prisma aggregations for better performance
+  const [
+    total,
+    inStockCount,
+    outOfStockCount,
+    featuredCount,
+    avgPrice,
+    allProducts,
+  ] = await Promise.all([
+    prisma.product.count(),
+    prisma.product.count({ where: { inStock: true } }),
+    prisma.product.count({ where: { OR: [{ inStock: false }, { quantity: 0 }] } }),
+    prisma.product.count({ where: { featured: true } }),
+    prisma.product.aggregate({ _avg: { price: true } }),
+    prisma.product.findMany(), // Needed for low stock and inventory value
+  ]);
 
-  // Calculate average price
-  const totalPrice = products.reduce((sum, p) => sum + p.price, 0);
-  const averagePrice = Math.round(totalPrice / total);
+  const products = allProducts.map(transformDbProduct);
 
-  // Calculate total inventory value
+  // Calculate low stock count
+  const lowStock = products.filter(
+    p => p.inventory.inStock && p.inventory.quantity <= p.inventory.lowStockThreshold
+  ).length;
+
+  // Calculate inventory value
   const inventoryValue = products.reduce(
     (sum, p) => sum + p.price * p.inventory.quantity,
     0
@@ -232,11 +400,11 @@ export function getProductStats() {
 
   return {
     totalProducts: total,
-    inStock,
-    outOfStock,
+    inStock: inStockCount,
+    outOfStock: outOfStockCount,
     lowStock,
-    featured,
-    averagePrice,
+    featured: featuredCount,
+    averagePrice: Math.round(avgPrice._avg.price || 0),
     inventoryValue,
   };
 }
@@ -247,23 +415,29 @@ export function getProductStats() {
  * Finds products similar to the given product
  * Educational: Simple recommendation logic based on category and tags
  */
-export function getRelatedProducts(
+export async function getRelatedProducts(
   product: Product,
   limit: number = 4
-): Product[] {
-  return products
-    .filter(p => {
-      // Don't include the same product
-      if (p.id === product.id) return false;
+): Promise<Product[]> {
+  // First, get products in the same category
+  const dbProducts = await prisma.product.findMany({
+    where: {
+      category: product.category,
+      NOT: { id: product.id },
+    },
+    take: limit * 2, // Get more than we need to filter by tags
+  });
 
-      // Same category is a strong match
-      if (p.category === product.category) return true;
+  const products = dbProducts.map(transformDbProduct);
 
-      // Shared tags are also relevant
-      const sharedTags = p.tags.filter(tag => product.tags.includes(tag));
-      return sharedTags.length > 0;
-    })
-    .slice(0, limit);
+  // Sort by shared tags (products with more shared tags come first)
+  const sorted = products.sort((a, b) => {
+    const aSharedTags = a.tags.filter(tag => product.tags.includes(tag)).length;
+    const bSharedTags = b.tags.filter(tag => product.tags.includes(tag)).length;
+    return bSharedTags - aSharedTags;
+  });
+
+  return sorted.slice(0, limit);
 }
 
 /**

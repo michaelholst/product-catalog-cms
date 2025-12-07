@@ -18,10 +18,10 @@ import { FlyingGryphon } from '@/components/FlyingGryphon';
  */
 
 export default async function HomePage() {
-  // Fetch featured products
+  // Fetch featured products from database
   // Educational: async/await works directly in Server Components!
   // No need for useEffect, useState, or loading states
-  const featuredProducts = getFeaturedProducts(8);
+  const featuredProducts = await getFeaturedProducts(8);
 
   return (
     <main className="min-h-screen bg-gray-50">

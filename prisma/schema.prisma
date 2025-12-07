@@ -1,0 +1,56 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Category {
+  id           String    @id
+  slug         String    @unique
+  name         String
+  description  String
+  image        String?
+  parentId     String?
+  productCount Int       @default(0)
+  products     Product[]
+}
+
+model Product {
+  id               String   @id
+  slug             String   @unique
+  sku              String   @unique
+  name             String
+  description      String
+  longDescription  String?
+  price            Int // in cents
+  originalPrice    Int? // in cents
+  currency         String   @default("USD")
+  category         String
+  subcategory      String?
+  tags             String // JSON array
+  inStock          Boolean  @default(true)
+  quantity         Int      @default(0)
+  lowStockThreshold Int     @default(10)
+  reservedQuantity Int      @default(0)
+  images           String // JSON array of {url, alt, isPrimary}
+  featured         Boolean  @default(false)
+  isNew            Boolean  @default(false)
+  ratingAverage    Float?
+  ratingCount      Int?
+  attributes       String // JSON object
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  publishedAt      DateTime?
+
+  categoryRef      Category @relation(fields: [category], references: [slug])
+
+  @@index([category])
+  @@index([featured])
+  @@index([inStock])
+  @@index([createdAt])
+}
